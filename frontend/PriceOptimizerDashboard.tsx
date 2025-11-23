@@ -67,7 +67,7 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const API_URL = "https://my-price-api.onrender.com";
+        const API_URL = "https://price-optimizer-4xu9.onrender.com";
         const res = await fetch(`${API_URL}/api/find-competitor`, { method: 'GET', signal: AbortSignal.timeout(2000) });
         if (res.ok) setBackendStatus('connected');
         else setBackendStatus('disconnected');
