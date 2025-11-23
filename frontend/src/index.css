@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+*这步操作是把 Tailwind 的基础样式注入到你的项目中。*
+
+---
+
+### 第六步：安装其他必要的库（图表和图标）
+因为我的代码中还用到了 `recharts`（画图表）和 `lucide-react`（图标），你也需要现在安装它们，否则代码会报错。
+
+在终端（确保还在 `frontend` 目录下）执行：
+
+```powershell
+npm install recharts lucide-react
+```
+
+### 第七步：启动项目
+所有配置都完成了！现在启动你的前端项目：
+
+```powershell
+npm start

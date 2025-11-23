@@ -8,7 +8,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # 初始化 Flask 应用
 app = Flask(__name__)
 # 允许跨域请求 (CORS)，这样你的 React 前端 (通常在端口 3000) 才能访问这个 Python 后端 (端口 5000)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # --- 核心 AI 类 (复用之前的逻辑) ---
 
