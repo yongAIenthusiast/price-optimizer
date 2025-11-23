@@ -1,0 +1,16 @@
+前端杂项
+
+node_modules/
+build/
+dist/
+.env
+.DS_Store
+
+后端杂项
+
+pycache/
+*.py[cod]
+*$py.class
+venv/
+env/
+.pytest_cache/
