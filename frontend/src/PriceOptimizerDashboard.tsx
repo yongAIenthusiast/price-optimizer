@@ -91,7 +91,7 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
 
   // 这里为了演示，我们使用 Render 的 URL
-  const BACKEND_URL = "https://price-optimizer-api.onrender.com";
+  const BACKEND_URL = "https://price-optimizer-4xu9.onrender.com";
 
   const selectedProduct = useMemo(() =>
     products.find(p => p.id === selectedProductId) || products[0]
