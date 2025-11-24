@@ -7,7 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
 
-# 允许跨域
+# 强力 CORS 配置
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 
@@ -17,12 +17,12 @@ class AmazonCompetitorMatcher:
         self.hf_token = hf_token
         self.rainforest_url = "https://api.rainforestapi.com/request"
 
-        # ✅ 修改 1: 切换到一个更稳定的多语言模型 (DistilUSE)
-        # 这个模型通常不会强制进入 SentenceSimilarity 模式，更容易获取向量
         self.model_id = "sentence-transformers/distiluse-base-multilingual-cased-v1"
 
-        # ✅ 修改 2: 使用标准 API URL (如果这个报错 router，我们再换，但通常 models 路径是通用的)
-        self.hf_api_url = f"https://api-inference.huggingface.co/models/{self.model_id}"
+        # ✅ 终极修复：
+        # 1. 使用 router.huggingface.co 新域名 (解决 410 错误)
+        # 2. 显式指定 /pipeline/feature-extraction/ 路径 (解决 'sentences' 参数缺失错误)
+        self.hf_api_url = f"https://router.huggingface.co/hf-inference/pipeline/feature-extraction/{self.model_id}"
 
     def _make_rainforest_request(self, params):
         params['api_key'] = self.rainforest_api_key
@@ -52,27 +52,17 @@ class AmazonCompetitorMatcher:
             "options": {"wait_for_model": True}
         }
         try:
-            print(f"🧠 Calling HuggingFace ({self.model_id}) for {len(texts)} texts...")
+            print(f"🧠 Calling HuggingFace Router (Feature Extraction) for {len(texts)} texts...")
+            # 打印 URL 以便调试，确保它是 feature-extraction
+            print(f"   Endpoint: {self.hf_api_url}")
+
             response = requests.post(self.hf_api_url, headers=headers, json=payload, timeout=30)
 
-            # ✅ 核心调试：如果状态码不是 200，打印原始内容
             if response.status_code != 200:
                 print(f"❌ HF API Error {response.status_code}: {response.text}")
-
-                # 如果提示要用 router，我们在这里做个自动回退 (Failover)
-                if "router.huggingface.co" in response.text:
-                    print("⚠️ API requests redirect to Router. Retrying with Router URL...")
-                    router_url = f"https://router.huggingface.co/hf-inference/models/{self.model_id}"
-                    response = requests.post(router_url, headers=headers, json=payload, timeout=30)
-
-            # 尝试解析 JSON
-            try:
-                result = response.json()
-            except Exception:
-                print(f"❌ Critical: Response is not JSON. Raw body: {response.text[:200]}...")
                 return None
 
-            return result
+            return response.json()
 
         except Exception as e:
             print(f"❌ HuggingFace Network Error: {e}")
@@ -86,7 +76,7 @@ class AmazonCompetitorMatcher:
         candidates = []
         if data and 'search_results' in data:
             # 限制前 3 个
-            for item in data['search_results'][:1]:
+            for item in data['search_results'][:3]:
                 candidates.append({
                     'id': item.get('asin'),
                     'title': item.get('title'),
@@ -109,7 +99,7 @@ class AmazonCompetitorMatcher:
             dt = self.get_product_details(item['id'])
             if dt:
                 item['desc_text'] = dt
-                all_texts.append(dt[:800])  # 稍微减少长度以防超限
+                all_texts.append(dt[:800])
                 valid_candidates.append(item)
 
         if not valid_candidates: return None, []
@@ -117,34 +107,36 @@ class AmazonCompetitorMatcher:
         # 3. 向量
         embeddings = self.get_embeddings_from_hf(all_texts)
 
-        # 错误处理
         if not embeddings or isinstance(embeddings, dict):
             print(f"Embeddings failed. Response: {embeddings}")
-            # 兜底：如果 AI 挂了，返回模拟数据防止前端报错
-            fallback_match = valid_candidates[0]
-            fallback_match['similarity'] = 0.0
-            fallback_match['features'] = "AI Service Error - Check Logs"
-            return fallback_match, valid_candidates
+            # 兜底模拟数据，防止前端白屏
+            if valid_candidates:
+                print("⚠️ Using fallback simulation data due to AI error")
+                best = valid_candidates[0]
+                best['similarity'] = 0.0
+                best['features'] = "AI Service Unavailable"
+                return best, valid_candidates
+            return None, []
 
-        # 维度检查 (确保返回的是向量列表)
         if not isinstance(embeddings, list):
             print(f"Unexpected format: {type(embeddings)}")
             return None, []
 
         # 4. 计算
         try:
-            my_vector = np.array(embeddings[0])
-            # 处理嵌套情况 [[...]]
-            if my_vector.ndim > 1: my_vector = my_vector[0]
-            my_vector = my_vector.reshape(1, -1)
+            # 处理 Hugging Face 返回的维度问题 (有时是 [N, 384], 有时是 [1, N, 384])
+            embeddings_arr = np.array(embeddings)
+            if embeddings_arr.ndim == 3:
+                embeddings_arr = embeddings_arr[0]  # 降维
+
+            my_vector = embeddings_arr[0].reshape(1, -1)
 
             best_match = None
             highest_score = -1
 
             for i, item in enumerate(valid_candidates):
-                item_vector = np.array(embeddings[i + 1])
-                if item_vector.ndim > 1: item_vector = item_vector[0]
-                item_vector = item_vector.reshape(1, -1)
+                # i+1 因为第0个是我的文本
+                item_vector = embeddings_arr[i + 1].reshape(1, -1)
 
                 score = float(cosine_similarity(my_vector, item_vector)[0][0])
                 item['similarity'] = score
@@ -156,7 +148,7 @@ class AmazonCompetitorMatcher:
 
             return best_match, valid_candidates
         except Exception as e:
-            print(f"Math Error during similarity calc: {e}")
+            print(f"Math Error: {e}")
             return None, []
 
 
@@ -164,7 +156,7 @@ class AmazonCompetitorMatcher:
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return jsonify({"status": "online", "model": "DistilUSE Multilingual"}), 200
+    return jsonify({"status": "online", "model": "DistilUSE (Forced Feature Extraction)"}), 200
 
 
 @app.route('/api/find-competitor', methods=['POST', 'OPTIONS'])
@@ -180,6 +172,7 @@ def find_competitor():
     h_token = os.environ.get("HF_TOKEN")
 
     if not r_key or not h_token:
+        print("❌ 错误: 环境变量缺失")
         response = jsonify({"error": "Missing Env Vars"})
         response.headers.add('Access-Control-Allow-Origin', '*')
         return response, 500
