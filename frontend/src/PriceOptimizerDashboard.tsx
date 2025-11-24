@@ -1,14 +1,50 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts';
 import {
   DollarSign, TrendingUp, Activity, Search, AlertCircle, CheckCircle, Zap,
-  LayoutDashboard, Settings, Users, ShoppingBag, BrainCircuit, Target, ArrowRight, Loader, Server, WifiOff
+  LayoutDashboard, Settings, Users, ShoppingBag, BrainCircuit, Target, Loader, Server, WifiOff
 } from 'lucide-react';
 
+// --- 1. 定义 TypeScript 接口 (这是修复报错的关键) ---
+
+interface Product {
+  id: number;
+  name: string;
+  category: string;
+  cost: number;
+  price: number;
+  competitorPrice: number;
+  elasticity: number;
+  salesVol: number;
+  stock: number;
+  suggestedPrice?: number; // 可选属性
+}
+
+interface MatchResult {
+  id: string;
+  title: string;
+  price: number;
+  currency: string;
+  sales: number;
+  similarity: number;
+  matchType?: string;
+  features?: string;
+  link?: string;
+}
+
+interface StatCardProps {
+  title: string;
+  value: string;
+  change: string;
+  isPositive: boolean | null;
+  icon: React.ReactNode;
+}
+
 // --- Mock Data Generators ---
-const generateMockProducts = () => [
+
+const generateMockProducts = (): Product[] => [
   { id: 101, name: "Wireless Noise-Canceling Headphones", category: "Electronics", cost: 120, price: 199.99, competitorPrice: 189.50, elasticity: -2.1, salesVol: 500, stock: 120 },
   { id: 102, name: "Organic Arabica Coffee Beans (1kg)", category: "Groceries", cost: 15, price: 28.00, competitorPrice: 32.00, elasticity: -0.8, salesVol: 1200, stock: 450 },
   { id: 103, name: "Men's Running Sneakers", category: "Apparel", cost: 45, price: 89.99, competitorPrice: 85.00, elasticity: -1.5, salesVol: 300, stock: 80 },
@@ -16,8 +52,7 @@ const generateMockProducts = () => [
   { id: 105, name: "Stainless Steel Water Bottle", category: "Accessories", cost: 8, price: 25.00, competitorPrice: 22.50, elasticity: -1.2, salesVol: 800, stock: 200 },
 ];
 
-// --- Fallback Mock Data (当后端未连接时使用) ---
-const MOCK_AMAZON_RESULTS = [
+const MOCK_AMAZON_RESULTS: MatchResult[] = [
   {
     id: "B03DEF789",
     title: "Premium Bodenstuhl, 14 Stufen einstellbar (90°-180°) [SIMULATION]",
@@ -30,7 +65,8 @@ const MOCK_AMAZON_RESULTS = [
   }
 ];
 
-const calculateProjectedMetrics = (product, newPrice) => {
+// 修复这里的 any 报错：明确指定 product 和 newPrice 的类型
+const calculateProjectedMetrics = (product: Product, newPrice: number) => {
   const priceChangePct = (newPrice - product.price) / product.price;
   const quantityChangePct = product.elasticity * priceChangePct;
   const newVol = Math.max(0, product.salesVol * (1 + quantityChangePct));
@@ -40,9 +76,9 @@ const calculateProjectedMetrics = (product, newPrice) => {
 };
 
 export default function PriceOptimizerDashboard() {
-  const [activeTab, setActiveTab] = useState('competitor_matcher'); // Default to matcher for demo
-  const [products, setProducts] = useState(generateMockProducts());
-  const [selectedProductId, setSelectedProductId] = useState(null);
+  const [activeTab, setActiveTab] = useState('competitor_matcher');
+  const [products, setProducts] = useState<Product[]>(generateMockProducts());
+  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [simulatedPrice, setSimulatedPrice] = useState(0);
 
   // Competitor Matcher State
@@ -51,9 +87,14 @@ export default function PriceOptimizerDashboard() {
 Stellen Sie den Stuhl auf den Boden, heben Sie die Rückenlehne an und stellen Sie sie nach Bedarf in eine bequeme Position.
 Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
   const [isMatching, setIsMatching] = useState(false);
-  const [matchLogs, setMatchLogs] = useState<string[]>([]);
-  const [matchResult, setMatchResult] = useState<any>(null);
+  const [matchLogs, setMatchLogs] = useState<string[]>([]); // 明确是字符串数组
+  const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+
+  // 获取 Render 的后端地址，如果是本地开发则用 localhost
+  // 注意：在 Vercel 部署时，如果后端还没配置好域名，可能需要硬编码或设置环境变量
+  // 这里为了演示，我们使用一个 fallback 逻辑
+  const BACKEND_URL = "https://price-optimizer-api.onrender.com";
 
   const selectedProduct = useMemo(() =>
     products.find(p => p.id === selectedProductId) || products[0]
@@ -63,11 +104,12 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
     if (selectedProduct) setSimulatedPrice(selectedProduct.price);
   }, [selectedProduct]);
 
-  // Check Backend Status on Load
+  // Check Backend Status
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const res = await fetch('http://localhost:5000/', { method: 'GET', signal: AbortSignal.timeout(2000) });
+        // 尝试连接后端健康检查
+        const res = await fetch(`${BACKEND_URL}/`, { method: 'GET', signal: AbortSignal.timeout(2000) });
         if (res.ok) setBackendStatus('connected');
         else setBackendStatus('disconnected');
       } catch (e) {
@@ -77,7 +119,7 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
     checkBackend();
   }, []);
 
-  const handleOptimize = (id) => {
+  const handleOptimize = (id: number) => {
     setProducts(prev => prev.map(p => {
       if (p.id !== id) return p;
       let optimalPrice;
@@ -90,51 +132,44 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
     }));
   };
 
-  const applyPrice = (id, newPrice) => {
+  const applyPrice = (id: number, newPrice: number) => {
     setProducts(prev => prev.map(p =>
       p.id === id ? { ...p, price: newPrice, suggestedPrice: undefined } : p
     ));
     setSimulatedPrice(newPrice);
   };
 
-  // --- AI Matcher Logic (Real + Fallback) ---
   const runCompetitorMatcher = async () => {
     setIsMatching(true);
     setMatchLogs([]);
     setMatchResult(null);
     setMatchLogs(prev => [...prev, `🚀 Starting Analysis...`]);
 
-    if (backendStatus === 'connected') {
-      // --- REAL BACKEND MODE ---
-      try {
-        setMatchLogs(prev => [...prev, `📡 Connecting to Local Python Server (Port 5000)...`]);
+    // 这里我们直接尝试连接云端后端
+    try {
+      setMatchLogs(prev => [...prev, `📡 Connecting to AI Cloud (${BACKEND_URL})...`]);
 
-        const response = await fetch('http://localhost:5000/api/find-competitor', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyword: targetKeyword, description: productDesc })
-        });
+      const response = await fetch(`${BACKEND_URL}/api/find-competitor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: targetKeyword, description: productDesc })
+      });
 
-        if (!response.ok) throw new Error("Server responded with error");
+      if (!response.ok) throw new Error("Server responded with error");
 
-        setMatchLogs(prev => [...prev, `✅ Data received from Rainforest API & AI Model`]);
-        const data = await response.json();
+      setMatchLogs(prev => [...prev, `✅ Data received from Rainforest API & HF Model`]);
+      const data = await response.json();
 
-        if (data.success && data.best_match) {
-           setMatchResult(data.best_match);
-           setMatchLogs(prev => [...prev, `🎯 Best Match Found: ${data.best_match.id} (Similarity: ${data.best_match.similarity.toFixed(2)})`]);
-        } else {
-           setMatchLogs(prev => [...prev, `⚠️ No matches found.`]);
-        }
-
-      } catch (error) {
-        setMatchLogs(prev => [...prev, `❌ Error: ${error.message}`]);
-        setMatchLogs(prev => [...prev, `⚠️ Falling back to Simulation Mode...`]);
-        runSimulationMode();
+      if (data.success && data.best_match) {
+          setMatchResult(data.best_match);
+          setMatchLogs(prev => [...prev, `🎯 Best Match Found: ${data.best_match.id} (Similarity: ${(data.best_match.similarity * 100).toFixed(1)}%)`]);
+      } else {
+          setMatchLogs(prev => [...prev, `⚠️ No matches found.`]);
       }
-    } else {
-      // --- SIMULATION MODE ---
-      setMatchLogs(prev => [...prev, `⚠️ Backend unreachable. Switching to Simulation Mode.`]);
+
+    } catch (error: any) {
+      setMatchLogs(prev => [...prev, `❌ Connection Failed: ${error.message}`]);
+      setMatchLogs(prev => [...prev, `⚠️ Switching to Demo/Simulation Mode...`]);
       runSimulationMode();
     }
 
@@ -158,7 +193,7 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
 
   const renderDashboard = () => {
     const simulationMetrics = calculateProjectedMetrics(selectedProduct, simulatedPrice);
-    const generateDemandCurve = (product) => {
+    const generateDemandCurve = (product: Product) => {
       const data = [];
       for (let i = -20; i <= 20; i += 5) {
         const testPrice = product.price * (1 + (i / 100));
@@ -301,26 +336,21 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
                 <BrainCircuit className="mr-2 text-purple-600" size={24}/>
                 AI Competitor Discovery
               </h2>
-              {/* Backend Status Indicator */}
               <div className="flex items-center text-xs">
                 {backendStatus === 'connected' ? (
                    <span className="flex items-center text-green-600 font-bold bg-green-50 px-2 py-1 rounded-full border border-green-200">
-                     <Server size={12} className="mr-1"/> Backend Active
+                     <Server size={12} className="mr-1"/> Cloud Active
                    </span>
                 ) : (
                    <span className="flex items-center text-red-500 font-bold bg-red-50 px-2 py-1 rounded-full border border-red-200">
-                     <WifiOff size={12} className="mr-1"/> Backend Offline
+                     <WifiOff size={12} className="mr-1"/> Cloud Offline
                    </span>
                 )}
               </div>
             </div>
 
             <p className="text-sm text-gray-500 mb-4">
-              Enter your product details below.
-              {backendStatus === 'connected' ?
-                <span className="text-green-600 font-bold"> System will use local Python Server & Rainforest API.</span> :
-                <span className="text-orange-600 font-bold"> System is running in Simulation Mode (Backend not detected).</span>
-              }
+              Enter your product details. Using <b>Rainforest API</b> for data and <b>Hugging Face</b> for AI.
             </p>
 
             <div className="space-y-4">
@@ -356,13 +386,12 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
                   disabled={isMatching}
                   className={`w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 ${isMatching ? 'opacity-70 cursor-wait' : ''}`}
                 >
-                  {isMatching ? <><Loader className="animate-spin mr-2" size={18}/> Running Analysis...</> : 'Find Best Competitor'}
+                  {isMatching ? <><Loader className="animate-spin mr-2" size={18}/> Analyzing...</> : 'Find Best Competitor'}
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Console Log Window */}
           <div className="bg-slate-900 rounded-xl shadow-lg border border-slate-700 p-4 font-mono text-xs h-64 overflow-y-auto">
              <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-2">
                <span className="text-slate-400">System Terminal</span>
@@ -373,8 +402,7 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
                </div>
              </div>
              <div className="space-y-1">
-               <p className="text-green-400">$ system_status --check</p>
-               <p className="text-slate-400">{`> Backend: ${backendStatus.toUpperCase()}`}</p>
+               <p className="text-green-400">$ connect --host render.com</p>
                {matchLogs.map((log, idx) => (
                  <p key={idx} className="text-slate-300 break-all">
                    <span className="text-blue-400">[{new Date().toLocaleTimeString()}]</span> {log}
@@ -416,9 +444,9 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
                </div>
 
                <div className="mb-6 w-full">
-                 <h5 className="text-xs font-bold text-gray-500 mb-2 uppercase">Features</h5>
-                 <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded border border-blue-100">
-                    {matchResult.features}
+                 <h5 className="text-xs font-bold text-gray-500 mb-2 uppercase">Matched Features</h5>
+                 <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded border border-blue-100 max-h-24 overflow-y-auto">
+                    {matchResult.features || "Detailed analysis available"}
                  </div>
                </div>
 
@@ -438,13 +466,13 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
               {isMatching ? (
                  <div className="animate-pulse flex flex-col items-center">
                    <BrainCircuit className="text-purple-300 mb-4 animate-bounce" size={64}/>
-                   <p className="text-gray-400 font-medium">Scanning Amazon Vector Space...</p>
+                   <p className="text-gray-400 font-medium">Scanning Vector Space...</p>
                  </div>
               ) : (
                 <>
                   <Search className="text-gray-300 mb-4" size={64}/>
                   <h3 className="text-xl font-medium text-gray-400">Ready to Analyze</h3>
-                  <p className="text-gray-400 mt-2 max-w-xs">Enter your product details on the left to start the AI matching process.</p>
+                  <p className="text-gray-400 mt-2 max-w-xs">Enter product details to start.</p>
                 </>
               )}
             </>
@@ -522,7 +550,7 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
   );
 }
 
-function StatCard({ title, value, change, isPositive, icon }) {
+function StatCard({ title, value, change, isPositive, icon }: StatCardProps) {
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
       <div className="flex justify-between items-start mb-4">
