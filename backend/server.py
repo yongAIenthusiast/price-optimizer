@@ -17,7 +17,7 @@ class AmazonCompetitorMatcher:
         self.hf_token = hf_token
         self.rainforest_url = "https://api.rainforestapi.com/request"
         # 使用 HF 云端模型，避免 Render 内存溢出
-        self.hf_api_url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        self.hf_api_url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     def _make_rainforest_request(self, params):
         params['api_key'] = self.rainforest_api_key
