@@ -3,26 +3,19 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
-
 # 强力 CORS 配置
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 
 class AmazonCompetitorMatcher:
-    def __init__(self, rainforest_api_key, hf_token):
+    def __init__(self, rainforest_api_key):
         self.rainforest_api_key = rainforest_api_key
-        self.hf_token = hf_token
         self.rainforest_url = "https://api.rainforestapi.com/request"
-
-        self.model_id = "sentence-transformers/distiluse-base-multilingual-cased-v1"
-
-        # ✅ 终极修复：
-        # 1. 使用 router.huggingface.co 新域名 (解决 410 错误)
-        # 2. 显式指定 /pipeline/feature-extraction/ 路径 (解决 'sentences' 参数缺失错误)
-        self.hf_api_url = f"https://router.huggingface.co/hf-inference/pipeline/feature-extraction/{self.model_id}"
+        # 移除 Hugging Face 相关配置，我们不再需要它了
 
     def _make_rainforest_request(self, params):
         params['api_key'] = self.rainforest_api_key
@@ -43,30 +36,33 @@ class AmazonCompetitorMatcher:
         if not data or 'product' not in data:
             return ""
         p = data['product']
+        # 组合标题、五点描述和长描述
         return f"{p.get('title', '')}. " + " ".join(p.get('feature_bullets', [])) + str(p.get('description', ''))
 
-    def get_embeddings_from_hf(self, texts):
-        headers = {"Authorization": f"Bearer {self.hf_token}"}
-        payload = {
-            "inputs": texts,
-            "options": {"wait_for_model": True}
-        }
+    def calculate_local_similarity(self, texts):
+        """
+        ✅ 核心替代方案：本地 TF-IDF 算法
+        不依赖外部 API，利用统计学原理计算文本相似度。
+        对于包含具体参数（如 '14 Stufen', '90kg'）的产品描述，这种方法非常精准。
+        """
         try:
-            print(f"🧠 Calling HuggingFace Router (Feature Extraction) for {len(texts)} texts...")
-            # 打印 URL 以便调试，确保它是 feature-extraction
-            print(f"   Endpoint: {self.hf_api_url}")
+            print(f"🧠 Running Local TF-IDF for {len(texts)} texts...")
+            # 初始化向量化器 (自动处理德语停用词需下载nltk，这里用默认配置足够)
+            vectorizer = TfidfVectorizer()
 
-            response = requests.post(self.hf_api_url, headers=headers, json=payload, timeout=30)
+            # 将文本转换为 TF-IDF 矩阵
+            tfidf_matrix = vectorizer.fit_transform(texts)
 
-            if response.status_code != 200:
-                print(f"❌ HF API Error {response.status_code}: {response.text}")
-                return None
+            # 计算余弦相似度
+            # 第一个向量(tfidf_matrix[0:1])是我的产品
+            # 后面的向量(tfidf_matrix[1:])是竞品
+            cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
 
-            return response.json()
-
+            return cosine_similarities
         except Exception as e:
-            print(f"❌ HuggingFace Network Error: {e}")
-            return None
+            print(f"❌ Local Algo Error: {e}")
+            # 如果只有一段文本（没有竞品），会报错，返回空
+            return [0.0] * (len(texts) - 1)
 
     def search_and_match(self, my_desc, keyword):
         # 1. 搜索
@@ -90,7 +86,7 @@ class AmazonCompetitorMatcher:
         if not candidates:
             return None, []
 
-        # 2. 详情
+        # 2. 获取详情
         all_texts = [my_desc]
         valid_candidates = []
 
@@ -99,64 +95,41 @@ class AmazonCompetitorMatcher:
             dt = self.get_product_details(item['id'])
             if dt:
                 item['desc_text'] = dt
-                all_texts.append(dt[:800])
+                all_texts.append(dt)  # 本地算法没有长度限制，可以使用全文！
                 valid_candidates.append(item)
 
         if not valid_candidates: return None, []
 
-        # 3. 向量
-        embeddings = self.get_embeddings_from_hf(all_texts)
+        # 3. 本地计算相似度 (取代 HF API)
+        similarity_scores = self.calculate_local_similarity(all_texts)
 
-        if not embeddings or isinstance(embeddings, dict):
-            print(f"Embeddings failed. Response: {embeddings}")
-            # 兜底模拟数据，防止前端白屏
-            if valid_candidates:
-                print("⚠️ Using fallback simulation data due to AI error")
-                best = valid_candidates[0]
-                best['similarity'] = 0.0
-                best['features'] = "AI Service Unavailable"
-                return best, valid_candidates
-            return None, []
+        best_match = None
+        highest_score = -1
 
-        if not isinstance(embeddings, list):
-            print(f"Unexpected format: {type(embeddings)}")
-            return None, []
+        # 4. 整理结果
+        for i, item in enumerate(valid_candidates):
+            # 获取分数
+            if i < len(similarity_scores):
+                score = float(similarity_scores[i])
+            else:
+                score = 0.0
 
-        # 4. 计算
-        try:
-            # 处理 Hugging Face 返回的维度问题 (有时是 [N, 384], 有时是 [1, N, 384])
-            embeddings_arr = np.array(embeddings)
-            if embeddings_arr.ndim == 3:
-                embeddings_arr = embeddings_arr[0]  # 降维
+            item['similarity'] = score
+            # 截取一段描述用于前端展示
+            item['features'] = item['desc_text'][:100] + "..."
 
-            my_vector = embeddings_arr[0].reshape(1, -1)
+            if score > highest_score:
+                highest_score = score
+                best_match = item
 
-            best_match = None
-            highest_score = -1
-
-            for i, item in enumerate(valid_candidates):
-                # i+1 因为第0个是我的文本
-                item_vector = embeddings_arr[i + 1].reshape(1, -1)
-
-                score = float(cosine_similarity(my_vector, item_vector)[0][0])
-                item['similarity'] = score
-                item['features'] = item['desc_text'][:100] + "..."
-
-                if score > highest_score:
-                    highest_score = score
-                    best_match = item
-
-            return best_match, valid_candidates
-        except Exception as e:
-            print(f"Math Error: {e}")
-            return None, []
+        return best_match, valid_candidates
 
 
 # --- Route ---
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return jsonify({"status": "online", "model": "DistilUSE (Forced Feature Extraction)"}), 200
+    return jsonify({"status": "online", "algorithm": "Local TF-IDF (Stable)"}), 200
 
 
 @app.route('/api/find-competitor', methods=['POST', 'OPTIONS'])
@@ -169,16 +142,15 @@ def find_competitor():
     description = data.get('description', '')
 
     r_key = os.environ.get("RAINFOREST_API_KEY")
-    h_token = os.environ.get("HF_TOKEN")
+    # 注意：我们不再检查 HF_TOKEN，因为不需要了
 
-    if not r_key or not h_token:
-        print("❌ 错误: 环境变量缺失")
-        response = jsonify({"error": "Missing Env Vars"})
+    if not r_key:
+        response = jsonify({"error": "Missing RAINFOREST_API_KEY"})
         response.headers.add('Access-Control-Allow-Origin', '*')
         return response, 500
 
     try:
-        matcher = AmazonCompetitorMatcher(r_key, h_token)
+        matcher = AmazonCompetitorMatcher(r_key)
         best, all_results = matcher.search_and_match(description, keyword)
         return jsonify({"success": True, "best_match": best, "all_candidates": all_results})
     except Exception as e:
