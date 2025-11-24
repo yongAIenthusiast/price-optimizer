@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Settings, Users, ShoppingBag, BrainCircuit, Target, Loader, Server, WifiOff
 } from 'lucide-react';
 
-// --- 1. 定义 TypeScript 接口 (这是修复报错的关键) ---
+// --- 1. 定义 TypeScript 接口 ---
 
 interface Product {
   id: number;
@@ -19,7 +19,7 @@ interface Product {
   elasticity: number;
   salesVol: number;
   stock: number;
-  suggestedPrice?: number; // 可选属性
+  suggestedPrice?: number; // 可选属性 (undefined | number)
 }
 
 interface MatchResult {
@@ -65,7 +65,6 @@ const MOCK_AMAZON_RESULTS: MatchResult[] = [
   }
 ];
 
-// 修复这里的 any 报错：明确指定 product 和 newPrice 的类型
 const calculateProjectedMetrics = (product: Product, newPrice: number) => {
   const priceChangePct = (newPrice - product.price) / product.price;
   const quantityChangePct = product.elasticity * priceChangePct;
@@ -87,13 +86,11 @@ export default function PriceOptimizerDashboard() {
 Stellen Sie den Stuhl auf den Boden, heben Sie die Rückenlehne an und stellen Sie sie nach Bedarf in eine bequeme Position.
 Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
   const [isMatching, setIsMatching] = useState(false);
-  const [matchLogs, setMatchLogs] = useState<string[]>([]); // 明确是字符串数组
+  const [matchLogs, setMatchLogs] = useState<string[]>([]);
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
 
-  // 获取 Render 的后端地址，如果是本地开发则用 localhost
-  // 注意：在 Vercel 部署时，如果后端还没配置好域名，可能需要硬编码或设置环境变量
-  // 这里为了演示，我们使用一个 fallback 逻辑
+  // 这里为了演示，我们使用 Render 的 URL
   const BACKEND_URL = "https://price-optimizer-api.onrender.com";
 
   const selectedProduct = useMemo(() =>
@@ -108,7 +105,6 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        // 尝试连接后端健康检查
         const res = await fetch(`${BACKEND_URL}/`, { method: 'GET', signal: AbortSignal.timeout(2000) });
         if (res.ok) setBackendStatus('connected');
         else setBackendStatus('disconnected');
@@ -145,7 +141,6 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
     setMatchResult(null);
     setMatchLogs(prev => [...prev, `🚀 Starting Analysis...`]);
 
-    // 这里我们直接尝试连接云端后端
     try {
       setMatchLogs(prev => [...prev, `📡 Connecting to AI Cloud (${BACKEND_URL})...`]);
 
@@ -247,7 +242,10 @@ Multifunktionales Bodensofa – Egal ob Sie lesen, das Handyspiel spielen...`);
                     <td className="p-4">
                       {product.suggestedPrice ? (
                         <button
-                          onClick={(e) => { e.stopPropagation(); applyPrice(product.id, product.suggestedPrice); }}
+                          /* 【修复】这里使用了 || 0 来确保类型安全
+                             如果 suggestedPrice 是 undefined，就传 0
+                          */
+                          onClick={(e) => { e.stopPropagation(); applyPrice(product.id, product.suggestedPrice || 0); }}
                           className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 shadow-sm"
                         >
                           Apply ${product.suggestedPrice}
